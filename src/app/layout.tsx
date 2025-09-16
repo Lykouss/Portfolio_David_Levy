@@ -6,7 +6,8 @@ import "./globals.css";
 
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
-import { usePathname } from "next/navigation"; // 1. Importar o hook
+import { usePathname } from "next/navigation";
+import { Analytics } from "@vercel/analytics/next"
 
 const plusJakartaSans = Plus_Jakarta_Sans({
   subsets: ["latin"],
