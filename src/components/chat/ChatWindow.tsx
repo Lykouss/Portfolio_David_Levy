@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from 'react';
-import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, writeBatch, where, getDocs, Timestamp } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, writeBatch, where, getDocs, Timestamp, doc, setDoc, increment, getDoc } from 'firebase/firestore';
 import { ref, onValue, set, onDisconnect, serverTimestamp as rtdbServerTimestamp } from "firebase/database";
 import { db, rtdb } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
@@ -17,7 +17,6 @@ interface ChatWindowProps {
   onBack: () => void;
 }
 
-// Hook de presença atualizado para retornar um objeto de status
 const usePresence = (uid: string | undefined): PresenceStatus => {
   const [status, setStatus] = useState<PresenceStatus>({ isOnline: false });
   useEffect(() => {
@@ -31,7 +30,6 @@ const usePresence = (uid: string | undefined): PresenceStatus => {
   return status;
 };
 
-// Função para formatar o "Visto por último"
 const formatLastSeen = (timestamp: number | undefined): string => {
   if (!timestamp) return "Offline";
   const date = new Date(timestamp);
@@ -53,7 +51,6 @@ export default function ChatWindow({ selectedUser, onBack }: ChatWindowProps) {
   const messagesEndRef = useRef<null | HTMLDivElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Efeito para gerir o status de presença do UTILIZADOR ATUAL
   useEffect(() => {
     if (!currentUser) return;
     const userStatusRef = ref(rtdb, `/status/${currentUser.uid}`);
@@ -73,39 +70,38 @@ export default function ChatWindow({ selectedUser, onBack }: ChatWindowProps) {
     return format(timestamp.toDate(), 'HH:mm');
   };
 
-  // Efeito para buscar mensagens e marcá-las como lidas
   useEffect(() => {
     if (!currentUser || !selectedUser) return;
+
     const chatId = [currentUser.uid, selectedUser.uid].sort().join('_');
     const messagesRef = collection(db, 'chats', chatId, 'messages');
     const q = query(messagesRef, orderBy('createdAt', 'asc'));
 
     const unsubscribe = onSnapshot(q, async (snapshot) => {
-      const fetchedMessages = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-      })) as ChatMessage[];
+      const fetchedMessages = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as ChatMessage[];
       setMessages(fetchedMessages);
+
+      const chatRef = doc(db, 'chats', chatId);
+      const chatSnap = await getDoc(chatRef);
+      if (chatSnap.exists()) {
+        await setDoc(chatRef, { unreadCount: { [currentUser.uid]: 0 } }, { merge: true });
+      }
 
       const unreadMessagesQuery = query(messagesRef, where('senderId', '==', selectedUser.uid), where('isRead', '==', false));
       const unreadSnapshot = await getDocs(unreadMessagesQuery);
       if (!unreadSnapshot.empty) {
         const batch = writeBatch(db);
-        unreadSnapshot.docs.forEach(doc => {
-          batch.update(doc.ref, { isRead: true });
-        });
+        unreadSnapshot.docs.forEach(doc => batch.update(doc.ref, { isRead: true }));
         await batch.commit();
       }
     });
     return () => unsubscribe();
   }, [currentUser, selectedUser]);
   
-  // Efeito para rolar para a última mensagem
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Efeito para detetar se o OUTRO utilizador está a digitar
   useEffect(() => {
     if (!currentUser || !selectedUser) return;
     const chatId = [currentUser.uid, selectedUser.uid].sort().join('_');
@@ -115,18 +111,15 @@ export default function ChatWindow({ selectedUser, onBack }: ChatWindowProps) {
     });
     return () => unsubscribe();
   }, [currentUser, selectedUser]);
-
+  
   const handleTyping = (e: React.ChangeEvent<HTMLInputElement>) => {
     setNewMessage(e.target.value);
     if (!currentUser) return;
     const chatId = [currentUser.uid, selectedUser.uid].sort().join('_');
     const typingRef = ref(rtdb, `/typing/${chatId}/${currentUser.uid}`);
-    
     set(typingRef, { isTyping: true });
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-    typingTimeoutRef.current = setTimeout(() => {
-      set(typingRef, { isTyping: false });
-    }, 2000);
+    typingTimeoutRef.current = setTimeout(() => set(typingRef, { isTyping: false }), 2000);
   };
   
   const handleSendMessage = async (e: React.FormEvent) => {
@@ -134,20 +127,37 @@ export default function ChatWindow({ selectedUser, onBack }: ChatWindowProps) {
     if (newMessage.trim() === "" || !currentUser) return;
 
     const chatId = [currentUser.uid, selectedUser.uid].sort().join('_');
-    const messagesRef = collection(db, 'chats', chatId, 'messages');
+    const chatRef = doc(db, 'chats', chatId);
+    const messagesRef = collection(chatRef, 'messages');
+    
+    const batch = writeBatch(db);
 
-    await addDoc(messagesRef, {
+    const newMessageRef = doc(messagesRef);
+    batch.set(newMessageRef, {
       text: newMessage,
       senderId: currentUser.uid,
       createdAt: serverTimestamp(),
       isRead: false,
     });
 
+    batch.set(chatRef, {
+      participants: [currentUser.uid, selectedUser.uid],
+      lastMessage: {
+        text: newMessage,
+        createdAt: serverTimestamp(),
+        senderId: currentUser.uid,
+      },
+      unreadCount: {
+        [selectedUser.uid]: increment(1)
+      }
+    }, { merge: true });
+
+    await batch.commit();
+    
+    setNewMessage("");
     const typingRef = ref(rtdb, `/typing/${chatId}/${currentUser.uid}`);
     set(typingRef, { isTyping: false });
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-    
-    setNewMessage("");
   };
 
 
@@ -155,7 +165,6 @@ export default function ChatWindow({ selectedUser, onBack }: ChatWindowProps) {
 
   return (
     <div className="flex flex-col h-full bg-background">
-      {/* Cabeçalho com status dinâmico */}
       <div className="p-4 border-b border-secondary flex items-center gap-4 flex-shrink-0">
         <button onClick={onBack} className="md:hidden text-text-muted hover:text-accent">
           <ArrowLeft />
@@ -186,7 +195,6 @@ export default function ChatWindow({ selectedUser, onBack }: ChatWindowProps) {
         </div>
       </div>
 
-      {/* Lista de Mensagens */}
       <div className="flex-grow p-4 overflow-y-auto">
         <AnimatePresence>
           {messages.map((msg) => {
@@ -224,13 +232,12 @@ export default function ChatWindow({ selectedUser, onBack }: ChatWindowProps) {
         </AnimatePresence>
         {isTyping && (
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="flex justify-start">
-            <div className="p-3 rounded-lg bg-primary text-sm text-text-muted">A digitar...</div>
+            <div className="p-3 rounded-lg bg-primary text-sm text-text-muted">Digitando...</div>
           </motion.div>
         )}
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Formulário de Envio */}
       <div className="p-4 border-t border-secondary flex-shrink-0">
         <form onSubmit={handleSendMessage} className="flex gap-4">
           <input
