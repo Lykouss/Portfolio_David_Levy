@@ -11,15 +11,15 @@ export async function generateStaticParams() {
   }));
 }
 
-// Definindo o tipo manualmente (sem PageProps do Next)
+// Aqui aceitamos params normal OU Promise
 type ProjectPageProps = {
-  params: {
-    slug: string;
-  };
+  params: { slug: string } | Promise<{ slug: string }>;
 };
 
-export default function ProjectPage({ params }: ProjectPageProps) {
-  const { slug } = params;
+export default async function ProjectPage({ params }: ProjectPageProps) {
+  // Garante que params é resolvido mesmo se vier como Promise
+  const { slug } = await Promise.resolve(params);
+
   const project = projectsData.find((p) => p.slug === slug);
 
   if (!project) {
