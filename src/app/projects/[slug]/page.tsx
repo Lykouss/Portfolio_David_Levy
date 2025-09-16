@@ -4,10 +4,11 @@ import { projectsData } from "@/lib/projects-data";
 import { notFound } from "next/navigation";
 import ProjectPageClient from "./ProjectPageClient";
 
-// 1. Definindo o tipo correto para as props da página
-type Props = {
+// 1. Definindo um tipo mais completo e explícito para as props da página
+interface PageProps {
   params: { slug: string };
-};
+  searchParams: { [key: string]: string | string[] | undefined };
+}
 
 // Esta função ajuda o Next.js a saber quais páginas gerar estaticamente
 export async function generateStaticParams() {
@@ -16,8 +17,8 @@ export async function generateStaticParams() {
   }));
 }
 
-// 2. Usando o tipo 'Props' que definimos
-export default function ProjectPage({ params }: Props) {
+// 2. Usando a nossa nova interface 'PageProps'
+export default function ProjectPage({ params }: PageProps) {
   const { slug } = params;
   const project = projectsData.find((p) => p.slug === slug);
 
@@ -26,6 +27,5 @@ export default function ProjectPage({ params }: Props) {
     notFound();
   }
 
-  // Passamos os dados do projeto para um Componente de Cliente para poder animar
   return <ProjectPageClient project={project} />;
 }
