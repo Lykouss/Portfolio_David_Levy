@@ -1,8 +1,0 @@
-# Arquivos de sistema
-.DS_Store
-
-# Arquivos de log
-*.log
-
-# Dependências (se usar Node.js no futuro)
-node_modules/
