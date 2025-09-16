@@ -11,14 +11,13 @@ export async function generateStaticParams() {
   }));
 }
 
-// Aqui aceitamos params normal OU Promise
+// 👇 agora params é sempre uma Promise
 type ProjectPageProps = {
-  params: { slug: string } | Promise<{ slug: string }>;
+  params: Promise<{ slug: string }>;
 };
 
 export default async function ProjectPage({ params }: ProjectPageProps) {
-  // Garante que params é resolvido mesmo se vier como Promise
-  const { slug } = await Promise.resolve(params);
+  const { slug } = await params; // 👈 espera o Promise resolver
 
   const project = projectsData.find((p) => p.slug === slug);
 
