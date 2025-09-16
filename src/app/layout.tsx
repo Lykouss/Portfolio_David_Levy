@@ -1,7 +1,6 @@
 // src/app/layout.tsx
 "use client"; // Necessário para usar o hook usePathname
 
-import type { Metadata } from "next"; // A exportação de metadata ainda funciona
 import { Exo_2, Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
 
