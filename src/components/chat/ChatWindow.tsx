@@ -2,9 +2,9 @@
 "use client";
 
 import { useState, useEffect, useRef } from 'react';
-// 1. Importar o tipo Timestamp
 import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, writeBatch, where, getDocs, Timestamp } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { ref, onValue, set, onDisconnect } from "firebase/database";
+import { db, rtdb } from '@/lib/firebase'; // 'auth' foi removido daqui
 import { useAuth } from '@/context/AuthContext';
 import { UserProfile, ChatMessage } from '@/types';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -16,22 +16,53 @@ interface ChatWindowProps {
   onBack: () => void;
 }
 
+// O hook usePresence permanece o mesmo
+const usePresence = (uid: string | undefined) => {
+  const [isOnline, setIsOnline] = useState(false);
+  useEffect(() => {
+    if (!uid) return;
+    const userStatusRef = ref(rtdb, `/status/${uid}`);
+    const unsubscribe = onValue(userStatusRef, (snapshot) => {
+      setIsOnline(snapshot.val()?.isOnline || false);
+    });
+    return () => unsubscribe();
+  }, [uid]);
+  return isOnline;
+};
+
 export default function ChatWindow({ selectedUser, onBack }: ChatWindowProps) {
   const { user: currentUser } = useAuth();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [newMessage, setNewMessage] = useState("");
+  const isOnline = usePresence(selectedUser?.uid);
+  const [isTyping, setIsTyping] = useState(false);
   const messagesEndRef = useRef<null | HTMLDivElement>(null);
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // 2. Corrigido o 'any' para o tipo 'Timestamp'
+  // Efeito para gerir o status de presença do UTILIZADOR ATUAL
+  useEffect(() => {
+    if (!currentUser) return;
+    const userStatusRef = ref(rtdb, `/status/${currentUser.uid}`);
+    const connectedRef = ref(rtdb, '.info/connected');
+
+    const unsubscribe = onValue(connectedRef, (snap) => {
+      if (snap.val() === true) {
+        set(userStatusRef, { isOnline: true });
+        onDisconnect(userStatusRef).set({ isOnline: false });
+      }
+    });
+
+    return () => unsubscribe();
+  }, [currentUser]);
+
   const formatTimestamp = (timestamp: Timestamp) => {
     if (!timestamp) return '';
     return format(timestamp.toDate(), 'HH:mm');
   };
   
-  // ... (useEffect para buscar mensagens permanece o mesmo) ...
+  // Efeito para buscar mensagens e marcá-las como lidas
   useEffect(() => {
     if (!currentUser || !selectedUser) return;
-
     const chatId = [currentUser.uid, selectedUser.uid].sort().join('_');
     const messagesRef = collection(db, 'chats', chatId, 'messages');
     const q = query(messagesRef, orderBy('createdAt', 'asc'));
@@ -57,10 +88,35 @@ export default function ChatWindow({ selectedUser, onBack }: ChatWindowProps) {
     return () => unsubscribe();
   }, [currentUser, selectedUser]);
 
+  // Efeito para rolar para a última mensagem
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
   
+  // Efeito para detetar se o OUTRO utilizador está a digitar
+  useEffect(() => {
+    if (!currentUser || !selectedUser) return;
+    const chatId = [currentUser.uid, selectedUser.uid].sort().join('_');
+    const typingRef = ref(rtdb, `/typing/${chatId}/${selectedUser.uid}`);
+    const unsubscribe = onValue(typingRef, (snap) => {
+      setIsTyping(snap.val()?.isTyping || false);
+    });
+    return () => unsubscribe();
+  }, [currentUser, selectedUser]);
+
+  const handleTyping = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setNewMessage(e.target.value);
+    if (!currentUser) return;
+    const chatId = [currentUser.uid, selectedUser.uid].sort().join('_');
+    const typingRef = ref(rtdb, `/typing/${chatId}/${currentUser.uid}`);
+    
+    set(typingRef, { isTyping: true });
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    typingTimeoutRef.current = setTimeout(() => {
+      set(typingRef, { isTyping: false });
+    }, 2000);
+  };
+
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (newMessage.trim() === "" || !currentUser) return;
@@ -75,6 +131,11 @@ export default function ChatWindow({ selectedUser, onBack }: ChatWindowProps) {
       isRead: false,
     });
 
+    // Para de 'digitar' assim que a mensagem é enviada
+    const typingRef = ref(rtdb, `/typing/${chatId}/${currentUser.uid}`);
+    set(typingRef, { isTyping: false });
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    
     setNewMessage("");
   };
 
@@ -82,19 +143,33 @@ export default function ChatWindow({ selectedUser, onBack }: ChatWindowProps) {
 
   return (
     <div className="flex flex-col h-full bg-background">
-      {/* ... (código do cabeçalho, lista de mensagens e formulário permanece o mesmo) ... */}
+      {/* Cabeçalho */}
       <div className="p-4 border-b border-secondary flex items-center gap-4 flex-shrink-0">
         <button onClick={onBack} className="md:hidden text-text-muted hover:text-accent">
           <ArrowLeft />
         </button>
-        <h2 className="font-title text-xl font-bold">{selectedUser.displayName}</h2>
+        <div>
+          <h2 className="font-title text-xl font-bold">{selectedUser.displayName}</h2>
+          <div className="flex items-center gap-2 text-xs text-text-muted">
+            {isOnline ? (
+              <>
+                <span className="w-2 h-2 rounded-full bg-green-500"></span>
+                Online
+              </>
+            ) : (
+              "Offline"
+            )}
+          </div>
+        </div>
       </div>
 
+      {/* Lista de Mensagens */}
       <div className="flex-grow p-4 overflow-y-auto">
         <AnimatePresence>
           {messages.map((msg) => {
             const isSentByMe = msg.senderId === currentUser?.uid;
             return (
+              // A propriedade 'key' está aqui, garantindo que cada mensagem é única para o React
               <motion.div
                 key={msg.id}
                 layout
@@ -104,24 +179,42 @@ export default function ChatWindow({ selectedUser, onBack }: ChatWindowProps) {
               >
                 <div className={`max-w-xs md:max-w-md py-2 px-3 rounded-lg flex items-end gap-2 ${isSentByMe ? 'bg-accent text-background' : 'bg-primary'}`}>
                   <p className="break-words">{msg.text}</p>
-                  <div className="flex-shrink-0 text-xs opacity-70">
+                  <div className="flex-shrink-0 text-xs opacity-70 flex items-center">
                     {msg.createdAt && formatTimestamp(msg.createdAt)}
-                    {isSentByMe && (msg.isRead ? <CheckCheck size={16} className="inline-block ml-1"/> : <Check size={16} className="inline-block ml-1"/>)}
+                    {isSentByMe && (
+                      <AnimatePresence mode="wait">
+                        <motion.div
+                          key={msg.isRead ? 'read' : 'sent'}
+                          initial={{ opacity: 0, scale: 0.5 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          exit={{ opacity: 0, scale: 0.5 }}
+                          transition={{ duration: 0.2 }}
+                        >
+                          {msg.isRead ? <CheckCheck size={16} className="inline-block ml-1 text-blue-400"/> : <Check size={16} className="inline-block ml-1"/>}
+                        </motion.div>
+                      </AnimatePresence>
+                    )}
                   </div>
                 </div>
               </motion.div>
             );
           })}
         </AnimatePresence>
+        {isTyping && (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="flex justify-start">
+            <div className="p-3 rounded-lg bg-primary text-sm text-text-muted">A digitar...</div>
+          </motion.div>
+        )}
         <div ref={messagesEndRef} />
       </div>
 
+      {/* Formulário de Envio */}
       <div className="p-4 border-t border-secondary flex-shrink-0">
         <form onSubmit={handleSendMessage} className="flex gap-4">
           <input
             type="text"
             value={newMessage}
-            onChange={(e) => setNewMessage(e.target.value)}
+            onChange={handleTyping}
             placeholder="Digite sua mensagem..."
             className="flex-grow p-3 bg-primary border border-secondary rounded-lg focus:outline-none focus:ring-2 focus:ring-accent"
           />

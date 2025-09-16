@@ -6,6 +6,7 @@ import { useAuth } from "@/context/AuthContext";
 import { UserProfile } from "@/types";
 import Sidebar from "./Sidebar";
 import ChatWindow from "./ChatWindow";
+import { AnimatePresence, motion } from "framer-motion";
 
 export default function ChatInterface() {
   const { user } = useAuth();
@@ -14,15 +15,23 @@ export default function ChatInterface() {
   if (!user) return null;
 
   return (
-    <div className="flex h-screen w-full overflow-hidden">
-      {/* Sidebar - Em telemóveis, ocupa a tela toda; em desktop, a lateral */}
-      {/* Usamos classes 'hidden' e 'flex' para controlar a visibilidade */}
-      <div className={`w-full md:w-1/3 lg:w-1/4 flex-shrink-0 transition-all duration-300 ${selectedChatUser ? 'hidden md:flex' : 'flex'}`}>
-        <Sidebar onSelectChat={setSelectedChatUser} />
-      </div>
+    <div className="flex h-[100dvh] w-full overflow-hidden">
+      <AnimatePresence>
+        {/* Sidebar */}
+        <motion.div
+          key="sidebar"
+          className={`w-full md:w-1/3 lg:w-1/4 flex-shrink-0 bg-primary border-r border-secondary ${selectedChatUser ? 'hidden md:flex' : 'flex'}`}
+          initial={{ x: '-100%' }}
+          animate={{ x: 0 }}
+          exit={{ x: '-100%' }}
+          transition={{ duration: 0.3, ease: 'easeInOut' }}
+        >
+          <Sidebar onSelectChat={setSelectedChatUser} />
+        </motion.div>
+      </AnimatePresence>
 
-      {/* Janela de Chat - Ocupa a tela toda em telemóveis quando uma conversa é selecionada */}
-      <div className={`w-full flex-grow flex-col transition-all duration-300 ${selectedChatUser ? 'flex' : 'hidden md:flex'}`}>
+      {/* Janela de Chat */}
+      <div className={`w-full flex-grow flex-col ${selectedChatUser ? 'flex' : 'hidden md:flex'}`}>
         {selectedChatUser ? (
           <ChatWindow selectedUser={selectedChatUser} onBack={() => setSelectedChatUser(null)} />
         ) : (
