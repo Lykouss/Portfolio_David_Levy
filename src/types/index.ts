@@ -18,3 +18,8 @@ export interface ChatMessage {
   createdAt: Timestamp;
   isRead: boolean;
 }
+
+export interface PresenceStatus {
+  isOnline: boolean;
+  lastSeen?: number; // Usaremos um timestamp numérico do RTDB
+}

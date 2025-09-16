@@ -6,8 +6,10 @@ export default function ChatLayout({
   children: React.ReactNode;
 }) {
   return (
-    // Garante que a área do chat ocupe a tela toda, sem o Header e Footer principais
-    <div className="min-h-screen bg-background flex flex-col">
+    // A CORREÇÃO ESTÁ AQUI
+    // Usar 'h-[100dvh]' (altura dinâmica da janela de visualização) garante que
+    // o layout se redimensiona corretamente quando o teclado do telemóvel aparece.
+    <div className="h-[100dvh] bg-background flex flex-col">
       {children}
     </div>
   );

@@ -1,16 +1,7 @@
 /* src/app/globals.css */
-
-/* Com o Tailwind v4, não usamos mais @tailwind base, components, utilities.
-  Apenas @import "tailwindcss" é necessário.
-*/
 @import "tailwindcss";
 
-/*
-  A configuração de tema, antes feita no tailwind.config.ts,
-  agora é feita aqui dentro com a diretiva @theme.
-*/
 @theme {
-  /* Paleta de cores "nobre" */
   --color-background: #0A0A0A;
   --color-primary: #1E1E1E;
   --color-secondary: #2A2A2A;
@@ -19,10 +10,12 @@
   --color-text: #EAEAEA;
   --color-text-muted: #A0A0A0;
 
-  /* Configuração das Fontes */
   --font-sans: "var(--font-inter)", "sans-serif";
   --font-title: "var(--font-orbitron)", "sans-serif";
 
-  /* Efeito de brilho (box-shadow) */
   --shadow-glow: 0 0 15px 0 rgba(212, 175, 55, 0.3);
+}
+
+html, body, #__next {
+  height: 100%;
 }
