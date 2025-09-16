@@ -5,7 +5,7 @@ export interface UserProfile {
   uid: string;
   displayName: string;
   email: string;
-  userType: 'recruiter' | 'client';
+  userType: 'recruiter' | 'client' | 'admin';
   company?: string;
   project?: string;
   createdAt: Timestamp;
@@ -16,4 +16,5 @@ export interface ChatMessage {
   text: string;
   senderId: string;
   createdAt: Timestamp;
+  isRead: boolean;
 }

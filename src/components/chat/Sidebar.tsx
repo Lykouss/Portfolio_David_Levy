@@ -3,9 +3,11 @@
 
 import { useState, useEffect } from 'react';
 import { collection, query, where, onSnapshot, orderBy } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { db, auth } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
-import { UserProfile } from '@/types'; // 1. Importando nosso novo tipo
+import { UserProfile } from '@/types'; 
+import { signOut } from 'firebase/auth';
+import { LogOut } from 'lucide-react';
 
 const ADMIN_UID = "CPfFfTlIlGTEbrSm5MfmHJtePTE2"; // Lembre-se de colocar seu UID
 
@@ -14,6 +16,10 @@ export default function Sidebar({ onSelectChat }: { onSelectChat: (user: UserPro
   const { user: currentUser } = useAuth();
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const handleLogout = async () => {
+    await signOut(auth);
+  };
 
   useEffect(() => {
     if (!currentUser) return;
@@ -46,12 +52,21 @@ export default function Sidebar({ onSelectChat }: { onSelectChat: (user: UserPro
     return <div className="p-4 text-text-muted">Nenhum contato encontrado.</div>
   }
 
+  const getUserSubtitle = (user: UserProfile) => {
+    if (user.userType === 'admin') return 'Proprietário';
+    if (user.userType === 'recruiter') return `Empresa: ${user.company || 'Não informado'}`;
+    return `Projeto: ${user.project || 'Não informado'}`;
+  };
+
   return (
-    <div className="h-full overflow-y-auto bg-primary">
-      <div className="p-4 border-b border-secondary">
+    <div className="h-full flex flex-col bg-primary">
+      <div className="p-4 border-b border-secondary flex justify-between items-center">
         <h2 className="font-title text-xl">Conversas</h2>
+        <button onClick={handleLogout} title="Sair da conta" className="text-text-muted hover:text-accent transition-colors">
+          <LogOut size={20} />
+        </button>
       </div>
-      <ul>
+      <ul className="flex-grow overflow-y-auto">
         {users.map(user => (
           <li
             key={user.uid}
@@ -60,7 +75,7 @@ export default function Sidebar({ onSelectChat }: { onSelectChat: (user: UserPro
           >
             <p className="font-bold text-text truncate">{user.displayName}</p>
             <p className="text-sm text-text-muted truncate">
-              {user.userType === 'recruiter' ? `Empresa: ${user.company || 'Não informado'}` : `Projeto: ${user.project || 'Não informado'}`}
+              {getUserSubtitle(user)}
             </p>
           </li>
         ))}
