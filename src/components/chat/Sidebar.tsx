@@ -10,6 +10,8 @@ import { signOut } from 'firebase/auth';
 import { LogOut, User as UserIcon, Home } from 'lucide-react';
 import Link from 'next/link';
 
+const ADMIN_UID = "CPfFfTlIlGTEbrSm5MfmHJtePTE2";
+
 // Hook para buscar os dados do outro participante da conversa
 const useOtherParticipant = (chat: Chat, currentUserId: string | undefined) => {
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -17,6 +19,7 @@ const useOtherParticipant = (chat: Chat, currentUserId: string | undefined) => {
     if (!chat || !currentUserId) return;
     const otherUserId = chat.participants.find(uid => uid !== currentUserId);
     if (!otherUserId) return;
+
     const userRef = doc(db, 'users', otherUserId);
     const unsubscribe = onSnapshot(userRef, (doc) => {
       setUser(doc.data() as UserProfile);
@@ -64,14 +67,16 @@ const ChatListItem = ({ chat, onSelectChat, currentUserId }: { chat: Chat, onSel
 export default function Sidebar({ onSelectChat }: { onSelectChat: (user: UserProfile) => void }) {
   const { user: currentUser } = useAuth();
   const [chats, setChats] = useState<Chat[]>([]);
+  // **NOVA ADIÇÃO:** Estado para guardar o perfil do admin
+  const [adminProfile, setAdminProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
   const handleLogout = async () => { await signOut(auth); };
 
+  // Efeito para buscar as conversas existentes (lógica que você já tem)
   useEffect(() => {
     if (!currentUser) return;
 
-    // A lógica correta: buscar da coleção 'chats'
     const chatsRef = collection(db, 'chats');
     const q = query(
       chatsRef,
@@ -83,13 +88,27 @@ export default function Sidebar({ onSelectChat }: { onSelectChat: (user: UserPro
       const chatsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }) as Chat);
       setChats(chatsData);
       setLoading(false);
-    }, (error) => {
-      console.error("Erro ao buscar conversas:", error);
-      setLoading(false);
     });
 
     return () => unsubscribe();
   }, [currentUser]);
+
+  // **NOVA ADIÇÃO:** Efeito para garantir que o admin está sempre visível para os outros
+  useEffect(() => {
+    if (!currentUser || currentUser.uid === ADMIN_UID) return;
+
+    const adminRef = doc(db, 'users', ADMIN_UID);
+    const unsubscribe = onSnapshot(adminRef, (doc) => {
+      if (doc.exists()) {
+        setAdminProfile(doc.data() as UserProfile);
+      }
+    });
+
+    return () => unsubscribe();
+  }, [currentUser]);
+
+  // Verifica se uma conversa com o admin já está na lista de chats
+  const chatWithAdminExists = chats.some(chat => chat.participants.includes(ADMIN_UID));
 
   return (
     <div className="h-full w-full flex flex-col bg-primary">
@@ -105,8 +124,9 @@ export default function Sidebar({ onSelectChat }: { onSelectChat: (user: UserPro
 
       <div className="flex-grow overflow-y-auto">
         {loading && <p className="p-4 text-text-muted">A carregar...</p>}
-        {!loading && chats.length === 0 && <p className="p-4 text-text-muted">Nenhuma conversa iniciada.</p>}
+        {!loading && chats.length === 0 && !adminProfile && <p className="p-4 text-text-muted">Nenhuma conversa encontrada.</p>}
         
+        {/* Renderiza as conversas existentes */}
         {chats.map(chat => (
           <ChatListItem
             key={chat.id}
@@ -115,6 +135,24 @@ export default function Sidebar({ onSelectChat }: { onSelectChat: (user: UserPro
             currentUserId={currentUser!.uid}
           />
         ))}
+
+        {/* **NOVA ADIÇÃO:** Renderiza o perfil do admin se não houver já uma conversa com ele */}
+        {currentUser && currentUser.uid !== ADMIN_UID && !chatWithAdminExists && adminProfile && (
+           <div
+            onClick={() => onSelectChat(adminProfile)}
+            className="w-full flex items-center gap-3 p-4 border-b border-secondary/50 hover:bg-secondary cursor-pointer transition-colors"
+          >
+            <div className="flex-shrink-0">
+              <div className="w-12 h-12 bg-secondary rounded-full flex items-center justify-center">
+                <UserIcon className="text-text-muted" />
+              </div>
+            </div>
+            <div className="flex-1 min-w-0">
+              <h3 className="font-bold text-text truncate">{adminProfile.displayName}</h3>
+              <p className="text-sm text-text-muted truncate">Proprietário</p>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
