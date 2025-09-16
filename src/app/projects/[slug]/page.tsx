@@ -11,12 +11,12 @@ export async function generateStaticParams() {
   }));
 }
 
-// Definindo corretamente as props da Page
-interface ProjectPageProps {
+// Definindo o tipo manualmente (sem PageProps do Next)
+type ProjectPageProps = {
   params: {
     slug: string;
   };
-}
+};
 
 export default function ProjectPage({ params }: ProjectPageProps) {
   const { slug } = params;
