@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, useEffect } from 'react';
-import { collection, query, where, onSnapshot, orderBy, doc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc } from 'firebase/firestore'; // orderBy foi removido
 import { db, auth } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
 import { UserProfile, Chat } from '@/types';
@@ -10,16 +10,13 @@ import { signOut } from 'firebase/auth';
 import { LogOut, User as UserIcon, Home } from 'lucide-react';
 import Link from 'next/link';
 
-const ADMIN_UID = "CPfFfTlIlGTEbrSm5MfmHJtePTE2";
-
-// Hook para buscar os dados do outro participante da conversa
+// Hook useOtherParticipant permanece o mesmo
 const useOtherParticipant = (chat: Chat, currentUserId: string | undefined) => {
   const [user, setUser] = useState<UserProfile | null>(null);
   useEffect(() => {
     if (!chat || !currentUserId) return;
     const otherUserId = chat.participants.find(uid => uid !== currentUserId);
     if (!otherUserId) return;
-
     const userRef = doc(db, 'users', otherUserId);
     const unsubscribe = onSnapshot(userRef, (doc) => {
       setUser(doc.data() as UserProfile);
@@ -29,13 +26,11 @@ const useOtherParticipant = (chat: Chat, currentUserId: string | undefined) => {
   return user;
 };
 
-// Componente para um item da lista de conversas
+// Componente ChatListItem permanece o mesmo
 const ChatListItem = ({ chat, onSelectChat, currentUserId }: { chat: Chat, onSelectChat: (user: UserProfile) => void, currentUserId: string }) => {
   const otherUser = useOtherParticipant(chat, currentUserId);
   const unreadCount = chat.unreadCount?.[currentUserId] || 0;
-
   if (!otherUser) return null;
-
   return (
     <div
       onClick={() => onSelectChat(otherUser)}
@@ -67,25 +62,32 @@ const ChatListItem = ({ chat, onSelectChat, currentUserId }: { chat: Chat, onSel
 export default function Sidebar({ onSelectChat }: { onSelectChat: (user: UserProfile) => void }) {
   const { user: currentUser } = useAuth();
   const [chats, setChats] = useState<Chat[]>([]);
-  // **NOVA ADIÇÃO:** Estado para guardar o perfil do admin
   const [adminProfile, setAdminProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
   const handleLogout = async () => { await signOut(auth); };
 
-  // Efeito para buscar as conversas existentes (lógica que você já tem)
   useEffect(() => {
     if (!currentUser) return;
 
+    // A CORREÇÃO ESTÁ AQUI: A consulta foi simplificada
     const chatsRef = collection(db, 'chats');
     const q = query(
       chatsRef,
-      where('participants', 'array-contains', currentUser.uid),
-      orderBy('lastMessage.createdAt', 'desc')
+      where('participants', 'array-contains', currentUser.uid)
+      // A linha orderBy foi removida daqui
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const chatsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }) as Chat);
+      
+      // E a ordenação é feita aqui, no lado do cliente
+      chatsData.sort((a, b) => {
+        const dateA = a.lastMessage?.createdAt?.toDate() || new Date(0);
+        const dateB = b.lastMessage?.createdAt?.toDate() || new Date(0);
+        return dateB.getTime() - dateA.getTime();
+      });
+
       setChats(chatsData);
       setLoading(false);
     });
@@ -93,24 +95,22 @@ export default function Sidebar({ onSelectChat }: { onSelectChat: (user: UserPro
     return () => unsubscribe();
   }, [currentUser]);
 
-  // **NOVA ADIÇÃO:** Efeito para garantir que o admin está sempre visível para os outros
+  // Efeito para garantir que o admin está sempre visível (sem alterações)
   useEffect(() => {
-    if (!currentUser || currentUser.uid === ADMIN_UID) return;
-
-    const adminRef = doc(db, 'users', ADMIN_UID);
+    if (!currentUser || currentUser.uid === "CPfFfTlIlGTEbrSm5MfmHJtePTE2") return;
+    const adminRef = doc(db, 'users', "CPfFfTlIlGTEbrSm5MfmHJtePTE2");
     const unsubscribe = onSnapshot(adminRef, (doc) => {
       if (doc.exists()) {
         setAdminProfile(doc.data() as UserProfile);
       }
     });
-
     return () => unsubscribe();
   }, [currentUser]);
 
-  // Verifica se uma conversa com o admin já está na lista de chats
-  const chatWithAdminExists = chats.some(chat => chat.participants.includes(ADMIN_UID));
+  const chatWithAdminExists = chats.some(chat => chat.participants.includes("CPfFfTlIlGTEbrSm5MfmHJtePTE2"));
 
   return (
+    // O JSX permanece o mesmo da versão anterior
     <div className="h-full w-full flex flex-col bg-primary">
       <div className="p-4 border-b border-secondary flex justify-between items-center flex-shrink-0">
         <Link href="/" title="Voltar ao Portfólio" className="text-text-muted hover:text-accent transition-colors">
@@ -121,12 +121,9 @@ export default function Sidebar({ onSelectChat }: { onSelectChat: (user: UserPro
           <LogOut size={20} />
         </button>
       </div>
-
       <div className="flex-grow overflow-y-auto">
         {loading && <p className="p-4 text-text-muted">A carregar...</p>}
         {!loading && chats.length === 0 && !adminProfile && <p className="p-4 text-text-muted">Nenhuma conversa encontrada.</p>}
-        
-        {/* Renderiza as conversas existentes */}
         {chats.map(chat => (
           <ChatListItem
             key={chat.id}
@@ -135,9 +132,7 @@ export default function Sidebar({ onSelectChat }: { onSelectChat: (user: UserPro
             currentUserId={currentUser!.uid}
           />
         ))}
-
-        {/* **NOVA ADIÇÃO:** Renderiza o perfil do admin se não houver já uma conversa com ele */}
-        {currentUser && currentUser.uid !== ADMIN_UID && !chatWithAdminExists && adminProfile && (
+        {currentUser && currentUser.uid !== "CPfFfTlIlGTEbrSm5MfmHJtePTE2" && !chatWithAdminExists && adminProfile && (
            <div
             onClick={() => onSelectChat(adminProfile)}
             className="w-full flex items-center gap-3 p-4 border-b border-secondary/50 hover:bg-secondary cursor-pointer transition-colors"
