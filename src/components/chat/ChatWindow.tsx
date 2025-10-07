@@ -107,12 +107,63 @@ export default function ChatWindow({ selectedUser, onBack }: ChatWindowProps) {
   // Efeito para ouvir o status "digitando" do outro usuário
   useEffect(() => {
     if (!currentUser || !selectedUser) return;
+    setLoading(true);
+
     const chatId = [currentUser.uid, selectedUser.uid].sort().join('_');
-    const typingRef = ref(rtdb, `/typing/${chatId}/${selectedUser.uid}`);
-    const unsubscribe = onValue(typingRef, (snap) => {
-      setIsTyping(snap.val()?.isTyping || false);
+    const chatRef = doc(db, 'chats', chatId);
+    const messagesRef = collection(chatRef, 'messages');
+
+    // Função para iniciar o "ouvinte" de mensagens
+    const startListener = () => {
+      const q = query(messagesRef, orderBy('createdAt', 'asc'));
+      const unsubscribe = onSnapshot(q, async (snapshot) => {
+        const fetchedMessages = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as ChatMessage[];
+        setMessages(fetchedMessages);
+        setLoading(false);
+
+        // Lógica para marcar mensagens como lidas
+        await setDoc(chatRef, { unreadCount: { [currentUser.uid]: 0 } }, { merge: true });
+        const unreadMessagesQuery = query(messagesRef, where('senderId', '==', selectedUser.uid), where('isRead', '==', false));
+        const unreadSnapshot = await getDocs(unreadMessagesQuery);
+        if (!unreadSnapshot.empty) {
+          const batch = writeBatch(db);
+          unreadSnapshot.docs.forEach(doc => batch.update(doc.ref, { isRead: true }));
+          await batch.commit();
+        }
+      }, (error) => {
+        // Log de erro específico para o listener
+        console.error("Erro no onSnapshot do ChatWindow:", error);
+        setLoading(false);
+      });
+      return unsubscribe;
+    };
+
+    // LÓGICA PRINCIPAL DA CORREÇÃO
+    let unsubscribe: (() => void) | undefined;
+    
+    getDoc(chatRef).then(chatSnap => {
+      if (!chatSnap.exists()) {
+        // Se o chat não existe, cria ele com os participantes.
+        // Isso é crucial para que as regras de segurança permitam o acesso.
+        setDoc(chatRef, {
+          participants: [currentUser.uid, selectedUser.uid],
+          unreadCount: { [currentUser.uid]: 0, [selectedUser.uid]: 0 },
+          createdAt: serverTimestamp(),
+        }).then(() => {
+          // Após criar, inicia o ouvinte
+          unsubscribe = startListener();
+        });
+      } else {
+        // Se o chat já existe, apenas inicia o ouvinte
+        unsubscribe = startListener();
+      }
     });
-    return () => unsubscribe();
+
+    return () => {
+      if (unsubscribe) {
+        unsubscribe();
+      }
+    };
   }, [currentUser, selectedUser]);
   
   // Lida com a atualização do status "digitando" do usuário atual
