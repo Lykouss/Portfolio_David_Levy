@@ -6,10 +6,10 @@ export default function ChatLayout({
   children: React.ReactNode;
 }) {
   return (
-    // A CORREÇÃO ESTÁ AQUI
-    // Usar 'h-[100dvh]' (altura dinâmica da janela de visualização) garante que
-    // o layout se redimensiona corretamente quando o teclado do telemóvel aparece.
-    <div className="h-[100dvh] bg-background flex flex-col">
+    // A CORREÇÃO ESTÁ AQUI: Trocamos 'h-[100dvh]' por 'h-full'.
+    // h-full é mais consistente com a forma como os navegadores mobile
+    // redimensionam a página quando o teclado aparece.
+    <div className="h-full bg-background flex flex-col">
       {children}
     </div>
   );
