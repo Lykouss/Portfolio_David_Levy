@@ -131,7 +131,6 @@ export default function ChatWindow({ selectedUser, onBack }: ChatWindowProps) {
           await batch.commit();
         }
       }, (error) => {
-        // Log de erro específico para o listener
         console.error("Erro no onSnapshot do ChatWindow:", error);
         setLoading(false);
       });
@@ -152,6 +151,9 @@ export default function ChatWindow({ selectedUser, onBack }: ChatWindowProps) {
         }).then(() => {
           // Após criar, inicia o ouvinte
           unsubscribe = startListener();
+        }).catch(error => {
+          console.error("Erro ao criar o chat:", error);
+          setLoading(false);
         });
       } else {
         // Se o chat já existe, apenas inicia o ouvinte
