@@ -27,15 +27,13 @@ export default function AuthScreen() {
   const [userType, setUserType] = useState<UserType | null>(null);
   const [isLogin, setIsLogin] = useState(true);
   
-  // Dados do formulário
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [company, setCompany] = useState("");
   const [project, setProject] = useState("");
   const [error, setError] = useState("");
-
-  // Guarda o usuário do Google temporariamente antes de salvar o perfil
+  
   const [googleUser, setGoogleUser] = useState<User | null>(null);
 
   const handleSetUserType = (type: UserType) => {
@@ -50,7 +48,6 @@ export default function AuthScreen() {
     else if (step === 'method') setStep('userType');
   };
   
-  // Função para salvar dados do usuário no Firestore
   const saveUserData = async (user: User, additionalData: object) => {
     const userRef = doc(db, "users", user.uid);
     const dataToSave = {
@@ -63,32 +60,46 @@ export default function AuthScreen() {
     await setDoc(userRef, dataToSave, { merge: true });
   };
 
-  // Lógica para login com Google
   const handleGoogleSignIn = async () => {
     setError("");
+    if (!userType) {
+        setError("Por favor, selecione seu tipo de perfil primeiro.");
+        return;
+    }
     const provider = new GoogleAuthProvider();
     try {
-      const result = await signInWithPopup(auth, provider);
-      const userRef = doc(db, 'users', result.user.uid);
-      const userSnap = await getDoc(userRef);
+        const result = await signInWithPopup(auth, provider);
+        const user = result.user;
+        const userRef = doc(db, 'users', user.uid);
+        const userSnap = await getDoc(userRef);
 
-      // Se o usuário já existe no Firestore, o login está completo.
-      if (userSnap.exists()) {
-        // O onAuthStateChanged cuidará do resto
-        return; 
-      }
-      
-      // Se for um novo usuário, guarda os dados e avança para completar o perfil
-      setGoogleUser(result.user);
-      setStep('profileCompletion');
+        if (userSnap.exists()) {
+            // Usuário já existe, login concluído.
+            return;
+        }
+
+        // ***** A CORREÇÃO ESTÁ AQUI *****
+        // Se o usuário é novo, criamos um documento básico IMEDIATAMENTE.
+        await setDoc(userRef, {
+            uid: user.uid,
+            email: user.email,
+            displayName: user.displayName || 'Novo Usuário', // Usamos o nome do Google ou um placeholder
+            userType: userType, // Salvamos o tipo de usuário escolhido
+            createdAt: serverTimestamp(),
+        });
+        
+        // Agora, guardamos o usuário e avançamos para a tela de completar o perfil,
+        // que irá apenas ATUALIZAR o documento que acabamos de criar.
+        setGoogleUser(user);
+        setName(user.displayName || ""); // Pré-popula o nome se disponível
+        setStep('profileCompletion');
 
     } catch (err) {
-      console.error("Erro no login com Google:", err);
-      setError("Falha ao entrar com Google. Tente novamente.");
+        console.error("Erro no login com Google:", err);
+        setError("Falha ao entrar com Google. Tente novamente.");
     }
   };
   
-  // Lógica para formulário de completar perfil (pós-Google)
   const handleProfileCompletion = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!googleUser || !name) {
@@ -96,7 +107,8 @@ export default function AuthScreen() {
       return;
     }
     setError("");
-    const additionalData = userType === 'recruiter' ? { userType, company } : { userType, project };
+    // Agora isso é uma ATUALIZAÇÃO (merge), não uma criação.
+    const additionalData = userType === 'recruiter' ? { company } : { project };
     try {
       await saveUserData(googleUser, { ...additionalData, displayName: name });
     } catch (err) {
@@ -105,8 +117,6 @@ export default function AuthScreen() {
     }
   };
 
-
-  // Lógica para autenticação com Email/Senha
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email || !password || (!isLogin && !name)) {
@@ -138,9 +148,6 @@ export default function AuthScreen() {
       }
     }
   };
-
-
-  // --- Renderização dos Componentes de Etapa ---
 
   const renderUserTypeStep = () => (
     <motion.div key="userType" variants={variants} initial="hidden" animate="visible" exit="exit" className="text-center">
@@ -230,7 +237,6 @@ export default function AuthScreen() {
       </div>
     </motion.div>
   );
-
 
   return (
     <div className="flex-grow flex flex-col items-center justify-center p-4 overflow-hidden">
