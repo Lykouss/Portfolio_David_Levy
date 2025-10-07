@@ -5,20 +5,17 @@ import { useState, useEffect } from 'react';
 import { collection, query, where, onSnapshot, orderBy, doc, getDoc } from 'firebase/firestore';
 import { db, auth } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
-import { UserProfile, Chat } from '@/types'; // Importamos o novo tipo 'Chat'
+import { UserProfile, Chat } from '@/types';
 import { signOut } from 'firebase/auth';
-import { LogOut, User as UserIcon, Home, Loader2 } from 'lucide-react';
+import { LogOut, User as UserIcon, Home, Loader2, MessageSquareText } from 'lucide-react';
 import Link from 'next/link';
 import { formatDistanceToNowStrict } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { AnimatePresence, motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 
-// SEU UID DE ADMIN PRECISA DE ESTAR AQUI
 const ADMIN_UID = "CPfFfTlIlGTEbrSm5MfmHJtePTE2";
 
-// Novo componente para cada item da lista de chat
 const ChatListItem = ({ chat, onSelectChat, currentUserUid }: { chat: Chat, onSelectChat: (user: UserProfile) => void, currentUserUid: string }) => {
-  // Encontra o outro participante da conversa
   const otherParticipantUid = chat.participants.find(p => p !== currentUserUid);
   if (!otherParticipantUid) return null;
 
@@ -44,7 +41,6 @@ const ChatListItem = ({ chat, onSelectChat, currentUserUid }: { chat: Chat, onSe
         <div className="w-12 h-12 bg-secondary rounded-full flex items-center justify-center">
           <UserIcon className="text-text-muted" />
         </div>
-        {/* Futuramente, aqui podemos adicionar o status online */}
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex justify-between items-center">
@@ -56,8 +52,8 @@ const ChatListItem = ({ chat, onSelectChat, currentUserUid }: { chat: Chat, onSe
           )}
         </div>
         <div className="flex justify-between items-start mt-1">
-          <p className={`text-sm truncate ${unreadMessages > 0 ? 'text-text' : 'text-text-muted'}`}>
-            {chat.lastMessage?.text || 'Nenhuma mensagem ainda.'}
+          <p className={`text-sm truncate ${unreadMessages > 0 ? 'text-text font-semibold' : 'text-text-muted'}`}>
+            {chat.lastMessage?.text || 'Inicie a conversa!'}
           </p>
           {unreadMessages > 0 && (
             <motion.span
@@ -74,7 +70,6 @@ const ChatListItem = ({ chat, onSelectChat, currentUserUid }: { chat: Chat, onSe
   );
 };
 
-
 export default function Sidebar({ onSelectChat }: { onSelectChat: (user: UserProfile) => void }) {
   const { user: currentUser } = useAuth();
   const [chats, setChats] = useState<Chat[]>([]);
@@ -85,43 +80,35 @@ export default function Sidebar({ onSelectChat }: { onSelectChat: (user: UserPro
   };
 
   useEffect(() => {
-    if (!currentUser) return;
+    if (!currentUser || currentUser.uid !== ADMIN_UID) {
+      setLoading(false);
+      return;
+    };
 
-    // Se o usuário NÃO for o admin, busca apenas o perfil do admin para iniciar a conversa
-    if (currentUser.uid !== ADMIN_UID) {
-      const getAdminProfile = async () => {
-        const adminDoc = await getDoc(doc(db, 'users', ADMIN_UID));
-        if (adminDoc.exists()) {
-          onSelectChat(adminDoc.data() as UserProfile); // Abre o chat com o admin diretamente
-        } else {
-          console.error("Perfil do admin não encontrado.");
-        }
-        setLoading(false);
-      };
-      getAdminProfile();
-      return; // Encerra o useEffect aqui para não buscar outras conversas
-    }
-
-    // Se o usuário FOR o admin, busca todas as conversas em que ele participa
     const chatsRef = collection(db, 'chats');
     const q = query(chatsRef, where('participants', 'array-contains', currentUser.uid), orderBy('lastMessage.createdAt', 'desc'));
 
     const unsubscribe = onSnapshot(q, async (snapshot) => {
-      const chatsData = await Promise.all(snapshot.docs.map(async (docData) => {
+      const chatsDataPromises = snapshot.docs.map(async (docData) => {
         const chat = { id: docData.id, ...docData.data() } as Omit<Chat, 'participantProfiles'>;
         
-        // Busca os perfis de cada participante
         const participantProfiles: { [key: string]: UserProfile } = {};
         for (const uid of chat.participants) {
+          // Evita buscar o próprio perfil do admin repetidamente se já o tivermos
+          if (uid === currentUser.uid) {
+            // Pode ser útil ter os dados do usuário atual à mão
+            // participantProfiles[uid] = { uid: currentUser.uid, displayName: currentUser.displayName || '', email: currentUser.email || '', userType: 'admin', createdAt: Timestamp.now() };
+            continue;
+          }
           const userDoc = await getDoc(doc(db, 'users', uid));
           if (userDoc.exists()) {
             participantProfiles[uid] = userDoc.data() as UserProfile;
           }
         }
-        
         return { ...chat, participantProfiles } as Chat;
-      }));
+      });
       
+      const chatsData = await Promise.all(chatsDataPromises);
       setChats(chatsData);
       setLoading(false);
     }, (error) => {
@@ -130,21 +117,8 @@ export default function Sidebar({ onSelectChat }: { onSelectChat: (user: UserPro
     });
     
     return () => unsubscribe();
-  }, [currentUser, onSelectChat]);
+  }, [currentUser]);
 
-
-  // Se não for admin, a sidebar fica vazia (ou mostra uma tela de carregamento)
-  // pois o chat já foi aberto diretamente
-  if (currentUser && currentUser.uid !== ADMIN_UID) {
-    return (
-      <div className="h-full w-full flex flex-col bg-primary items-center justify-center text-text-muted">
-         <Loader2 className="animate-spin" size={24} />
-         <p className="mt-2">Carregando...</p>
-      </div>
-    );
-  }
-
-  // Renderização da sidebar para o ADMIN
   return (
     <div className="h-full w-full flex flex-col bg-primary">
       <div className="p-4 border-b border-secondary flex justify-between items-center flex-shrink-0">
@@ -164,9 +138,10 @@ export default function Sidebar({ onSelectChat }: { onSelectChat: (user: UserPro
           </div>
         )}
         {!loading && chats.length === 0 && (
-          <p className="p-4 text-center text-text-muted">
-            Nenhuma conversa foi iniciada ainda.
-          </p>
+          <div className="p-8 text-center text-text-muted flex flex-col items-center gap-4">
+            <MessageSquareText size={40} />
+            <p>Nenhuma conversa foi iniciada ainda.</p>
+          </div>
         )}
         
         <AnimatePresence>
@@ -176,7 +151,7 @@ export default function Sidebar({ onSelectChat }: { onSelectChat: (user: UserPro
               layout
               initial={{ opacity: 0, y: -20 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
+              exit={{ opacity: 0 }}
             >
               <ChatListItem chat={chat} onSelectChat={onSelectChat} currentUserUid={currentUser!.uid} />
             </motion.div>

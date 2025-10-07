@@ -4,13 +4,15 @@
 import { useState, useEffect, useRef } from 'react';
 import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, writeBatch, where, getDocs, Timestamp, doc, setDoc, increment, getDoc } from 'firebase/firestore';
 import { ref, onValue, set, onDisconnect, serverTimestamp as rtdbServerTimestamp } from "firebase/database";
-import { db, rtdb } from '@/lib/firebase';
+import { db, rtdb, auth } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
 import { UserProfile, ChatMessage, PresenceStatus } from '@/types';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, ArrowLeft, Check, CheckCheck, Loader2 } from 'lucide-react';
+import { Send, ArrowLeft, Check, CheckCheck, Loader2, Home, LogOut } from 'lucide-react';
 import { format, isToday, isYesterday, isSameDay } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { signOut } from 'firebase/auth';
+import Link from 'next/link';
 
 interface ChatWindowProps {
   selectedUser: UserProfile;
@@ -44,6 +46,8 @@ const formatLastSeen = (timestamp: number | undefined): string => {
   return `visto por último em ${format(date, 'dd/MM/yy HH:mm', { locale: ptBR })}`;
 };
 
+const ADMIN_UID = "CPfFfTlIlGTEbrSm5MfmHJtePTE2";
+
 export default function ChatWindow({ selectedUser, onBack }: ChatWindowProps) {
   const { user: currentUser } = useAuth();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -53,6 +57,12 @@ export default function ChatWindow({ selectedUser, onBack }: ChatWindowProps) {
   const [isTyping, setIsTyping] = useState(false);
   const messagesEndRef = useRef<null | HTMLDivElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const isAdmin = currentUser?.uid === ADMIN_UID;
+
+  const handleLogout = async () => {
+    await signOut(auth);
+  };
 
   // Efeito para registrar a presença do usuário atual
   useEffect(() => {
@@ -70,41 +80,6 @@ export default function ChatWindow({ selectedUser, onBack }: ChatWindowProps) {
   }, [currentUser]);
 
   // Efeito principal para buscar mensagens e marcar como lidas
-  useEffect(() => {
-    if (!currentUser || !selectedUser) return;
-    setLoading(true);
-
-    const chatId = [currentUser.uid, selectedUser.uid].sort().join('_');
-    const messagesRef = collection(db, 'chats', chatId, 'messages');
-    const q = query(messagesRef, orderBy('createdAt', 'asc'));
-
-    const unsubscribe = onSnapshot(q, async (snapshot) => {
-      const fetchedMessages = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as ChatMessage[];
-      setMessages(fetchedMessages);
-      setLoading(false);
-
-      // Lógica para marcar mensagens como lidas
-      const chatRef = doc(db, 'chats', chatId);
-      await setDoc(chatRef, { unreadCount: { [currentUser.uid]: 0 } }, { merge: true });
-
-      const unreadMessagesQuery = query(messagesRef, where('senderId', '==', selectedUser.uid), where('isRead', '==', false));
-      const unreadSnapshot = await getDocs(unreadMessagesQuery);
-
-      if (!unreadSnapshot.empty) {
-        const batch = writeBatch(db);
-        unreadSnapshot.docs.forEach(doc => batch.update(doc.ref, { isRead: true }));
-        await batch.commit();
-      }
-    });
-    return () => unsubscribe();
-  }, [currentUser, selectedUser]);
-
-  // Scroll para o final da conversa
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isTyping]);
-
-  // Efeito para ouvir o status "digitando" do outro usuário
   useEffect(() => {
     if (!currentUser || !selectedUser) return;
     setLoading(true);
@@ -137,26 +112,21 @@ export default function ChatWindow({ selectedUser, onBack }: ChatWindowProps) {
       return unsubscribe;
     };
 
-    // LÓGICA PRINCIPAL DA CORREÇÃO
     let unsubscribe: (() => void) | undefined;
     
     getDoc(chatRef).then(chatSnap => {
       if (!chatSnap.exists()) {
-        // Se o chat não existe, cria ele com os participantes.
-        // Isso é crucial para que as regras de segurança permitam o acesso.
         setDoc(chatRef, {
           participants: [currentUser.uid, selectedUser.uid],
           unreadCount: { [currentUser.uid]: 0, [selectedUser.uid]: 0 },
           createdAt: serverTimestamp(),
         }).then(() => {
-          // Após criar, inicia o ouvinte
           unsubscribe = startListener();
         }).catch(error => {
           console.error("Erro ao criar o chat:", error);
           setLoading(false);
         });
       } else {
-        // Se o chat já existe, apenas inicia o ouvinte
         unsubscribe = startListener();
       }
     });
@@ -168,19 +138,32 @@ export default function ChatWindow({ selectedUser, onBack }: ChatWindowProps) {
     };
   }, [currentUser, selectedUser]);
   
-  // Lida com a atualização do status "digitando" do usuário atual
+  // Scroll para o final da conversa
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, isTyping]);
+
+  // Efeito para ouvir o status "digitando" do outro usuário
+  useEffect(() => {
+    if (!currentUser || !selectedUser) return;
+    const chatId = [currentUser.uid, selectedUser.uid].sort().join('_');
+    const typingRef = ref(rtdb, `/typing/${chatId}/${selectedUser.uid}`);
+    const unsubscribe = onValue(typingRef, (snap) => {
+      setIsTyping(snap.val()?.isTyping || false);
+    });
+    return () => unsubscribe();
+  }, [currentUser, selectedUser]);
+  
   const handleTyping = (e: React.ChangeEvent<HTMLInputElement>) => {
     setNewMessage(e.target.value);
     if (!currentUser || !selectedUser) return;
     const chatId = [currentUser.uid, selectedUser.uid].sort().join('_');
     const typingRef = ref(rtdb, `/typing/${chatId}/${currentUser.uid}`);
     
-    // Se não estiver digitando, envia o status
     if (e.target.value.length > 0 && !typingTimeoutRef.current) {
         set(typingRef, { isTyping: true });
     }
 
-    // Limpa o timeout anterior e cria um novo
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     typingTimeoutRef.current = setTimeout(() => {
         set(typingRef, { isTyping: false });
@@ -206,10 +189,9 @@ export default function ChatWindow({ selectedUser, onBack }: ChatWindowProps) {
       isRead: false,
     });
     
-    // Atualiza o documento principal do chat
     batch.set(chatRef, {
       participants: [currentUser.uid, selectedUser.uid],
-      participantProfiles: { // Garante que os perfis estejam no doc do chat
+      participantProfiles: {
         [currentUser.uid]: { displayName: currentUser.displayName, email: currentUser.email },
         [selectedUser.uid]: { displayName: selectedUser.displayName, email: selectedUser.email },
       },
@@ -242,40 +224,61 @@ export default function ChatWindow({ selectedUser, onBack }: ChatWindowProps) {
 
   return (
     <div className="flex flex-col h-full bg-background">
-      {/* Cabeçalho */}
-      <div className="p-4 border-b border-secondary flex items-center gap-4 flex-shrink-0">
-        <button onClick={onBack} className="md:hidden text-text-muted hover:text-accent">
-          <ArrowLeft />
-        </button>
-        <div>
-          <h2 className="font-title text-xl font-bold">{selectedUser.displayName}</h2>
-          <div className="flex items-center gap-2 text-xs text-text-muted h-4">
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={presenceStatus.isOnline ? 'online' : (presenceStatus.lastSeen || 'offline')}
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 10 }}
-                transition={{ duration: 0.2 }}
-                className="flex items-center gap-2"
-              >
-                {isTyping ? (
-                    <span className="text-accent">digitando...</span>
-                ) : presenceStatus.isOnline ? (
-                  <>
-                    <span className="w-2 h-2 rounded-full bg-green-500"></span>
-                    Online
-                  </>
-                ) : (
-                  formatLastSeen(presenceStatus.lastSeen)
-                )}
-              </motion.div>
-            </AnimatePresence>
+      {isAdmin ? (
+        <div className="p-4 border-b border-secondary flex items-center gap-4 flex-shrink-0">
+          <button onClick={onBack} className="md:hidden text-text-muted hover:text-accent">
+            <ArrowLeft />
+          </button>
+          <div>
+            <h2 className="font-title text-xl font-bold">{selectedUser.displayName}</h2>
+            <div className="flex items-center gap-2 text-xs text-text-muted h-4">
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={presenceStatus.isOnline ? 'online' : (presenceStatus.lastSeen || 'offline')}
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 10 }}
+                  transition={{ duration: 0.2 }}
+                  className="flex items-center gap-2"
+                >
+                  {isTyping ? ( <span className="text-accent">digitando...</span> ) : presenceStatus.isOnline ? ( <> <span className="w-2 h-2 rounded-full bg-green-500"></span> Online </> ) : ( formatLastSeen(presenceStatus.lastSeen) )}
+                </motion.div>
+              </AnimatePresence>
+            </div>
           </div>
         </div>
-      </div>
+      ) : (
+        <div className="p-4 border-b border-secondary flex justify-between items-center flex-shrink-0">
+          <div className="flex items-center gap-4">
+            <div>
+              <h2 className="font-title text-xl font-bold">{selectedUser.displayName}</h2>
+              <div className="flex items-center gap-2 text-xs text-text-muted h-4">
+                <AnimatePresence mode="wait">
+                <motion.div
+                  key={presenceStatus.isOnline ? 'online' : (presenceStatus.lastSeen || 'offline')}
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 10 }}
+                  transition={{ duration: 0.2 }}
+                  className="flex items-center gap-2"
+                >
+                  {isTyping ? ( <span className="text-accent">digitando...</span> ) : presenceStatus.isOnline ? ( <> <span className="w-2 h-2 rounded-full bg-green-500"></span> Online </> ) : ( formatLastSeen(presenceStatus.lastSeen) )}
+                </motion.div>
+              </AnimatePresence>
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-6">
+            <Link href="/" title="Voltar ao Portfólio" className="text-text-muted hover:text-accent transition-colors">
+              <Home size={22} />
+            </Link>
+            <button onClick={handleLogout} title="Sair da conta" className="text-text-muted hover:text-accent transition-colors">
+              <LogOut size={22} />
+            </button>
+          </div>
+        </div>
+      )}
 
-      {/* Corpo das Mensagens */}
       <div className="flex-grow p-4 overflow-y-auto">
         {loading ? (
             <div className="flex justify-center items-center h-full text-text-muted">
@@ -283,7 +286,7 @@ export default function ChatWindow({ selectedUser, onBack }: ChatWindowProps) {
             </div>
         ) : (
             <AnimatePresence>
-              {messages.map((msg, index) => {
+              {messages.map((msg) => {
                 const isSentByMe = msg.senderId === currentUser?.uid;
                 const msgDate = msg.createdAt?.toDate();
                 let dateSeparator = null;
@@ -329,7 +332,6 @@ export default function ChatWindow({ selectedUser, onBack }: ChatWindowProps) {
         <div ref={messagesEndRef} />
       </div>
       
-      {/* Input de Mensagem */}
       <div className="p-4 border-t border-secondary flex-shrink-0">
         <form onSubmit={handleSendMessage} className="flex gap-4">
           <input
